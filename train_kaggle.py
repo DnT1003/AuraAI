@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.cuda.amp import autocast, GradScaler
 
 # Ép đưa thư mục src vào Python Path để giải quyết trượt ModuleNotFoundError từ model.py
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
@@ -45,8 +46,7 @@ def train():
         vocab_size=100277, use_bitnet=False, use_qlora=True, peft_lora_rank=16
     )
     
-    # Bắt buộc khởi tạo ở định dạng Float16 (Bán độ chính xác) để giảm 50% VRAM GPU T4
-    torch.set_default_dtype(torch.float16)
+    # Kỹ thuật xịn: Không ép cứng dtype để tránh NaN. Dùng chuẩn Float32 và để AMP lo phần thu nhỏ Activation.
     
     model = SotaDecoderCausalLM(config).to(device)
     eagle = EagleHead(hidden_size=2048, vocab_size=100277).to(device)
@@ -72,6 +72,9 @@ def train():
 
     print(f"[*] Sẵn sàng huấn luyện {sum(p.numel() for p in trainable_params):,} tham số!")
 
+    # Công cụ Tự động cân bằng và thu gọn ma trận tính toán chống NaNs
+    scaler = GradScaler()
+
     # 4. Vòng lặp Train
     model.train()
     eagle.train()
@@ -81,27 +84,32 @@ def train():
             
             optimizer.zero_grad()
             
-            # Forward Base Model
-            out = model(x, labels=y)
-            loss_base = out["loss"]
+            # Kích hoạt vùng bộ nhớ Hỗn hợp (Mixed Precision)
+            with autocast(dtype=torch.float16):
+                # Forward Base Model
+                out = model(x, labels=y)
+                loss_base = out["loss"]
+                
+                # Forward EAGLE Head (Học dự đoán token tiếp theo từ current_hidden)
+                current_hidden = out["hidden_states"][:, :-1, :] # Lấy tới token kế cuối
+                eagle_pred = eagle(current_hidden, x[:, 1:]) # Khớp với shift
+                
+                # Cho điểm phụ: Eagle prediction phải khớp với Hidden đích
+                target_hidden = out["hidden_states"][:, 1:, :].detach()
+                loss_eagle = nn.functional.mse_loss(eagle_pred, target_hidden)
+                
+                # Tổng hợp
+                loss = loss_base + 0.5 * loss_eagle
+                
+            # Backward qua Scaler chuẩn mực
+            scaler.scale(loss).backward()
             
-            # Forward EAGLE Head (Học dự đoán token tiếp theo từ current_hidden)
-            # eagle_head(current_hidden, input_token) -> hidden_truoc_khi_vao_lmhead
-            current_hidden = out["hidden_states"][:, :-1, :] # Lấy tới token kế cuối
-            eagle_pred = eagle(current_hidden, x[:, 1:]) # Khớp với shift
-            
-            # Cho điểm phụ: Eagle prediction phải khớp với Hidden đích
-            target_hidden = out["hidden_states"][:, 1:, :].detach()
-            loss_eagle = nn.functional.mse_loss(eagle_pred, target_hidden)
-            
-            # Tổng hợp & Lùi (Backward)
-            loss = loss_base + 0.5 * loss_eagle
-            loss.backward()
-            
-            # Clip gradient
+            # Gỡ scale trước khi phạt clip_grad_norm_
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
             
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
             
             if step % 10 == 0:
