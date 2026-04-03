@@ -24,7 +24,7 @@ def train():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, default="dummy.txt", help="Đường dẫn file txt/jsonl dataset trên Kaggle")
     parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=1) # Rút batch size về 1 để cứu VRAM
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--save_dir", type=str, default="/kaggle/working/weights")
     args = parser.add_argument_group()
@@ -45,8 +45,13 @@ def train():
         vocab_size=100277, use_bitnet=False, use_qlora=True, peft_lora_rank=16
     )
     
+    # Bắt buộc khởi tạo ở định dạng Float16 (Bán độ chính xác) để giảm 50% VRAM GPU T4
+    torch.set_default_dtype(torch.float16)
+    
     model = SotaDecoderCausalLM(config).to(device)
     eagle = EagleHead(hidden_size=2048, vocab_size=100277).to(device)
+    
+    # Ép kiểu LoRA layer về Float32 nếu cần (nhưng ta train thẳng trên fp16 với T4 cho nhẹ)
     
     # 2. Chuẩn bị Dữ liệu
     # (Nếu chạy test không có file, tạo 1 file dummy)
@@ -55,8 +60,8 @@ def train():
         with open(args.data_path, "w", encoding="utf-8") as f:
             f.write("Aura AI là hệ thống trí tuệ nhân tạo thế hệ mới. " * 500)
 
-    # Max sequence length giảm xuống 1024 nếu Kaggle T4 bị đầy RAM
-    dataloader = create_dataloader([args.data_path], batch_size=args.batch_size, max_seq_length=1024)
+    # Max sequence length giảm xuống 512 nếu Kaggle T4 bị đầy RAM
+    dataloader = create_dataloader([args.data_path], batch_size=args.batch_size, max_seq_length=512)
     
     # 3. Optimizer chỉ train gradient mở (LoRA weights & Eagle Head)
     trainable_params = [p for p in model.parameters() if p.requires_grad] + \
