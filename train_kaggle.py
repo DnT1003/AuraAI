@@ -63,7 +63,14 @@ def train():
     # Max sequence length giảm xuống 512 nếu Kaggle T4 bị đầy RAM
     dataloader = create_dataloader([args.data_path], batch_size=args.batch_size, max_seq_length=512)
     
-    # 3. Optimizer chỉ train gradient mở (LoRA weights & Eagle Head)
+    # 3. Optimizer cực hạn: Chỉ Train gradient mở (LoRA weights & Eagle Head)
+    # Rà soát đóng băng TOÀN BỘ Base Model (bao gồm cả Embedding và LM_Head tốn kém VRAM)
+    for name, param in model.named_parameters():
+        param.requires_grad = False
+        # Chỉ bật lại Gradient cho các cục Adapter siêu nhỏ
+        if "lora_" in name:
+            param.requires_grad = True
+
     trainable_params = [p for p in model.parameters() if p.requires_grad] + \
                        [p for p in eagle.parameters() if p.requires_grad]
                        
