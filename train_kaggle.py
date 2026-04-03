@@ -5,13 +5,16 @@ Copy lệnh này vào cell của Kaggle sau khi clone repo:
 !python train_kaggle.py --data_path "/kaggle/input/your-dataset/data.txt" --epochs 3 --batch_size 4
 """
 import os
+# Cứu tinh chống phân mảnh RAM cho Kaggle GPU T4
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import sys
 import argparse
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.cuda.amp import autocast, GradScaler
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.amp import autocast, GradScaler
 
 # Ép đưa thư mục src vào Python Path để giải quyết trượt ModuleNotFoundError từ model.py
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
@@ -37,19 +40,21 @@ def train():
     print(f"[*] Đang khởi động Training trên thiết bị: {device}")
 
     # 1. Khởi tạo Cấu hình & Model (Kéo scale lên cỡ vừa hoặc lớn tùy ý)
-    # Đây là mô hình 1.5B param giả định. Bật use_qlora = True để rèn LoRA thay vì Full weight!
+    # Đây là kích thước Micro (vừa đủ mạnh để chứng minh ý tưởng nhưng an toàn tuyệt đối cho T4)
+    # Đây là kích thước Micro (vừa đủ mạnh để chứng minh ý tưởng nhưng an toàn tuyệt đối cho T4)
+    # Bật use_qlora = True để rèn LoRA thay vì Full weight!
     config = ModelConfig(
-        num_hidden_layers=12, hidden_size=2048, moe_intermediate_size=1024,
-        n_routed_experts=8, num_experts_per_tok=2, n_shared_experts=2,
-        num_attention_heads=16, q_lora_rank=256, kv_lora_rank=128,
-        qk_nope_head_dim=64, qk_rope_head_dim=64, v_head_dim=64,
-        vocab_size=100277, use_bitnet=False, use_qlora=True, peft_lora_rank=16
+        num_hidden_layers=6, hidden_size=1024, moe_intermediate_size=512,
+        n_routed_experts=4, num_experts_per_tok=2, n_shared_experts=1,
+        num_attention_heads=8, q_lora_rank=64, kv_lora_rank=32,
+        qk_nope_head_dim=32, qk_rope_head_dim=32, v_head_dim=32,
+        vocab_size=100277, use_bitnet=False, use_qlora=True, peft_lora_rank=8
     )
     
     # Kỹ thuật xịn: Không ép cứng dtype để tránh NaN. Dùng chuẩn Float32 và để AMP lo phần thu nhỏ Activation.
     
     model = SotaDecoderCausalLM(config).to(device)
-    eagle = EagleHead(hidden_size=2048, vocab_size=100277).to(device)
+    eagle = EagleHead(hidden_size=1024, vocab_size=100277).to(device)
     
     # Ép kiểu LoRA layer về Float32 nếu cần (nhưng ta train thẳng trên fp16 với T4 cho nhẹ)
     
@@ -80,7 +85,7 @@ def train():
     print(f"[*] Sẵn sàng huấn luyện {sum(p.numel() for p in trainable_params):,} tham số!")
 
     # Công cụ Tự động cân bằng và thu gọn ma trận tính toán chống NaNs
-    scaler = GradScaler()
+    scaler = GradScaler("cuda")
 
     # 4. Vòng lặp Train
     model.train()
@@ -92,7 +97,7 @@ def train():
             optimizer.zero_grad()
             
             # Kích hoạt vùng bộ nhớ Hỗn hợp (Mixed Precision)
-            with autocast(dtype=torch.float16):
+            with autocast("cuda", dtype=torch.float16):
                 # Forward Base Model
                 out = model(x, labels=y)
                 loss_base = out["loss"]
