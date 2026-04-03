@@ -5,17 +5,20 @@ Copy lệnh này vào cell của Kaggle sau khi clone repo:
 !python train_kaggle.py --data_path "/kaggle/input/your-dataset/data.txt" --epochs 3 --batch_size 4
 """
 import os
+import sys
 import argparse
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-# Import từ source code của bạn
-from src.config import ModelConfig
-from src.model import SotaDecoderCausalLM
-from src.generate import EagleHead
-from src.dataset import create_dataloader
+# Ép đưa thư mục src vào Python Path để giải quyết trượt ModuleNotFoundError từ model.py
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+
+from config import ModelConfig
+from model import SotaDecoderCausalLM
+from generate import EagleHead
+from dataset import create_dataloader
 
 def train():
     parser = argparse.ArgumentParser()
