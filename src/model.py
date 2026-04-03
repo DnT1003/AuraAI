@@ -255,7 +255,7 @@ class DeepSeekMoE(nn.Module):
             
             out = self.routed_experts[expert_idx](x_flat[idx])
             out = out * routing_weights[idx, nth_expert, None].type_as(out)
-            final_hidden_states.index_add_(0, idx, out)
+            final_hidden_states.index_add_(0, idx, out.to(final_hidden_states.dtype))
 
         shared_out = self.shared_experts(x_flat)
         final_hidden_states = final_hidden_states + shared_out
