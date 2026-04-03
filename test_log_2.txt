@@ -1,0 +1,32 @@
+﻿============================================================
+AUDIT REPORT - AURA V2 CODEBASE
+============================================================
+
+[TEST 1] Init SotaDecoderCausalLM (small)...
+  [OK] Total params: 1,483,904
+
+[TEST 2] Forward pass (batch=1, seq=8)...
+  [OK] Loss: 6.2858
+  [OK] Logits shape: torch.Size([1, 8, 500])
+  [OK] Aux loss type: <class 'torch.Tensor'>
+
+[TEST 3] Backward pass...
+  [OK] Grads: 55/55 params have gradients
+
+[TEST 4] BitLinear mode...
+  [OK] BitNet forward+backward OK, loss=6.1589
+
+[TEST 5] PagedAttentionEngine...
+  [FAIL] shape '[2, 16, 1, 128]' is invalid for input of size 573440
+
+[TEST 6] EagleHead...
+  [OK] EagleHead output: torch.Size([1, 256])
+
+[TEST 7] SubAgentDispatcher...
+[Swarm Dispatcher] Nhß║¡n nhiß╗çm vß╗Ñ phß╗⌐c tß║íp: Test swarm dispatch...
+  [OK] Swarm returned string, len=168
+
+============================================================
+FAILED: 1 tests
+  - TEST5-engine: shape '[2, 16, 1, 128]' is invalid for input of size 573440
+============================================================
