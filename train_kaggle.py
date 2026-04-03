@@ -39,22 +39,23 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[*] Đang khởi động Training trên thiết bị: {device}")
 
-    # 1. Khởi tạo Cấu hình & Model (Kéo scale lên cỡ vừa hoặc lớn tùy ý)
-    # Đây là kích thước Micro (vừa đủ mạnh để chứng minh ý tưởng nhưng an toàn tuyệt đối cho T4)
-    # Đây là kích thước Micro (vừa đủ mạnh để chứng minh ý tưởng nhưng an toàn tuyệt đối cho T4)
-    # Bật use_qlora = True để rèn LoRA thay vì Full weight!
+    # 1. Khởi tạo Cấu hình & Model
+    # Cấu hình "Kịch khung an toàn" cho dòng Card 12GB VRAM (như RTX 3060, RTX 4070)
+    # Tổng Base Model: ~1.2 B tham số (đóng băng).
+    # Tổng Tham số Trainable (LoRA + Eagle): ~160 Triệu tham số.
+    # Ước lượng VRAM tiêu thụ lúc Train: 7GB - 9GB (Dư sức để nâng batch_size=2 hoặc seq_len=1024).
     config = ModelConfig(
-        num_hidden_layers=6, hidden_size=1024, moe_intermediate_size=512,
-        n_routed_experts=4, num_experts_per_tok=2, n_shared_experts=1,
-        num_attention_heads=8, q_lora_rank=64, kv_lora_rank=32,
-        qk_nope_head_dim=32, qk_rope_head_dim=32, v_head_dim=32,
-        vocab_size=100277, use_bitnet=False, use_qlora=True, peft_lora_rank=8
+        num_hidden_layers=12, hidden_size=1536, moe_intermediate_size=768,
+        n_routed_experts=8, num_experts_per_tok=2, n_shared_experts=2,
+        num_attention_heads=12, q_lora_rank=128, kv_lora_rank=64,
+        qk_nope_head_dim=64, qk_rope_head_dim=64, v_head_dim=64,
+        vocab_size=100277, use_bitnet=False, use_qlora=True, peft_lora_rank=16
     )
     
     # Kỹ thuật xịn: Không ép cứng dtype để tránh NaN. Dùng chuẩn Float32 và để AMP lo phần thu nhỏ Activation.
     
     model = SotaDecoderCausalLM(config).to(device)
-    eagle = EagleHead(hidden_size=1024, vocab_size=100277).to(device)
+    eagle = EagleHead(hidden_size=1536, vocab_size=100277).to(device)
     
     # Ép kiểu LoRA layer về Float32 nếu cần (nhưng ta train thẳng trên fp16 với T4 cho nhẹ)
     
